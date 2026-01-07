@@ -54,6 +54,12 @@ variable "enable_malware_protection" {
   default     = true
 }
 
+variable "enable_ebs_malware_protection" {
+  description = "Enable GuardDuty EBS malware protection (EBS_MALWARE_PROTECTION organization feature). Defaults to `false`."
+  type        = bool
+  default     = false
+}
+
 variable "manage_eks_addon" {
   description = "Enable the management of Amazon GuardDuty Agent EKS Addon through GuardDuty. Defaults to `false`."
   type        = bool
