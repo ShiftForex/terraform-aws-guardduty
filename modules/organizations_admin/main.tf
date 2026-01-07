@@ -108,7 +108,7 @@ resource "aws_guardduty_organization_configuration_feature" "ec2_runtime_monitor
 # Amazon EBS Malware Protection
 ##################################################
 resource "aws_guardduty_organization_configuration_feature" "ebs_protection" {
-  count = aws_guardduty_organization_configuration.this != null && var.enable_malware_protection ? 1 : 0
+  count = aws_guardduty_organization_configuration.this != null && var.enable_ebs_malware_protection ? 1 : 0
 
   detector_id = aws_guardduty_organization_configuration.this[0].detector_id
   name        = "EBS_MALWARE_PROTECTION"

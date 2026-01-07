@@ -21,7 +21,7 @@ resource "aws_guardduty_detector" "primary" {
   )
 
   provisioner "local-exec" {
-    command = "aws guardduty update-malware-scan-settings --detector-id ${self.id} --ebs-snapshot-preservation ${local.snapshot_preservation}"
+    command = var.enable_ebs_malware_protection ? "aws guardduty update-malware-scan-settings --detector-id ${self.id} --ebs-snapshot-preservation ${local.snapshot_preservation}" : "echo 'Skipping update-malware-scan-settings (enable_ebs_malware_protection=false)'"
   }
 }
 
@@ -120,7 +120,7 @@ resource "aws_guardduty_detector_feature" "ec2_runtime_monitoring" {
 # Amazon EBS Malware Protection
 ##################################################
 resource "aws_guardduty_detector_feature" "ebs_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection ? 1 : 0
+  count = var.enable_guardduty && var.enable_ebs_malware_protection ? 1 : 0
 
   detector_id = aws_guardduty_detector.primary.id
   name        = "EBS_MALWARE_PROTECTION"
@@ -132,7 +132,7 @@ resource "aws_guardduty_detector_feature" "ebs_protection" {
 ##################################################
 resource "aws_guardduty_malware_protection_plan" "this" {
   for_each = var.enable_guardduty && var.enable_malware_protection ? toset(var.malware_resource_protection) : []
-  role     = var.create_malware_protection_role ? aws_iam_service_linked_role.malware_protection : data.aws_iam_role.malware_protection
+  role     = var.create_malware_protection_role ? aws_iam_service_linked_role.malware_protection[0].arn : data.aws_iam_role.malware_protection[0].arn
 
   protected_resource {
     s3_bucket {

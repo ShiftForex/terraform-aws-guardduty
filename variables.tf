@@ -37,6 +37,12 @@ variable "enable_malware_protection" {
   default     = true
 }
 
+variable "enable_ebs_malware_protection" {
+  description = "Enable GuardDuty EBS malware protection (EBS_MALWARE_PROTECTION detector feature). Defaults to `false`."
+  type        = bool
+  default     = false
+}
+
 variable "enable_kubernetes_protection" {
   description = "Configure and enable Kubernetes audit logs as a data source for Kubernetes protection. Defaults to `true`."
   type        = bool
