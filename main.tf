@@ -132,7 +132,7 @@ resource "aws_guardduty_detector_feature" "ebs_protection" {
 ##################################################
 resource "aws_guardduty_malware_protection_plan" "this" {
   for_each = var.enable_guardduty && var.enable_malware_protection ? toset(var.malware_resource_protection) : []
-  role     = var.create_malware_protection_role ? aws_iam_service_linked_role.malware_protection[0].arn : data.aws_iam_role.malware_protection[0].arn
+  role     = aws_iam_role.s3_malware_protection[0].arn
 
   protected_resource {
     s3_bucket {
@@ -150,11 +150,133 @@ resource "aws_guardduty_malware_protection_plan" "this" {
     local.tags,
     var.tags
   )
+
+  depends_on = [
+    aws_iam_role_policy.s3_malware_protection
+  ]
 }
 
 resource "aws_iam_service_linked_role" "malware_protection" {
   count            = var.enable_guardduty && var.enable_malware_protection && var.create_malware_protection_role ? 1 : 0
   aws_service_name = "malware-protection.guardduty.amazonaws.com"
+}
+
+##################################################
+# IAM Role for S3 Malware Protection
+##################################################
+resource "aws_iam_role" "s3_malware_protection" {
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
+
+  name = "GuardDutyS3MalwareProtection-${data.aws_region.current.name}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "malware-protection-plan.guardduty.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(
+    local.tags,
+    var.tags
+  )
+}
+
+resource "aws_iam_role_policy" "s3_malware_protection" {
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
+
+  name = "GuardDutyS3MalwareProtectionPolicy"
+  role = aws_iam_role.s3_malware_protection[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowManagedRuleToSendS3EventsToGuardDuty"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:DeleteRule",
+          "events:PutTargets",
+          "events:RemoveTargets"
+        ]
+        Resource = ["arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]
+        Condition = {
+          StringLike = {
+            "events:ManagedBy" = "malware-protection-plan.guardduty.amazonaws.com"
+          }
+        }
+      },
+      {
+        Sid    = "AllowGuardDutyToMonitorS3ObjectEvents"
+        Effect = "Allow"
+        Action = [
+          "events:DescribeRule",
+          "events:ListTargetsByRule"
+        ]
+        Resource = ["arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]
+      },
+      {
+        Sid    = "AllowPostScanTag"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObjectTagging",
+          "s3:GetObjectTagging",
+          "s3:PutObjectVersionTagging",
+          "s3:GetObjectVersionTagging"
+        ]
+        Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/*"]
+      },
+      {
+        Sid    = "AllowEnableS3EventBridgeEvents"
+        Effect = "Allow"
+        Action = [
+          "s3:PutBucketNotification",
+          "s3:GetBucketNotification"
+        ]
+        Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
+      },
+      {
+        Sid    = "AllowPutValidationObject"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/malware-protection-resource-validation-object"]
+      },
+      {
+        Sid    = "AllowCheckBucketOwnership"
+        Effect = "Allow"
+        Action = ["s3:ListBucket"]
+        Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
+      },
+      {
+        Sid    = "AllowMalwareScan"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/*"]
+      },
+      {
+        Sid    = "AllowDecryptForMalwareScan"
+        Effect = "Allow"
+        Action = [
+          "kms:GenerateDataKey",
+          "kms:Decrypt"
+        ]
+        Resource = ["arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/*"]
+        Condition = {
+          StringLike = {
+            "kms:ViaService" = "s3.${data.aws_region.current.name}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 }
 
 ##################################################
