@@ -4,6 +4,18 @@ variable "replica_region" {
   default     = null
 }
 
+variable "create_detector" {
+  description = "Create a new GuardDuty detector. Set to `false` to use an existing detector in the account/region. Defaults to `true`."
+  type        = bool
+  default     = true
+}
+
+variable "create_s3_malware_protection_role" {
+  description = "Create the IAM role for GuardDuty S3 Malware Protection. Set to `false` when the role already exists in the account/region. Defaults to `true`."
+  type        = bool
+  default     = true
+}
+
 ##################################################
 # GuardDuty Detector
 ##################################################

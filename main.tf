@@ -1,5 +1,8 @@
 locals {
-  snapshot_preservation = var.enable_snapshot_retention ? "'RETENTION_WITH_FINDING'" : "'NO_RETENTION'"
+  detector_id                     = var.create_detector ? aws_guardduty_detector.primary[0].id : data.aws_guardduty_detector.existing[0].id
+  s3_malware_protection_role_arn  = var.create_s3_malware_protection_role ? try(aws_iam_role.s3_malware_protection[0].arn, null) : try(data.aws_iam_role.s3_malware_protection[0].arn, null)
+  s3_malware_protection_role_name = var.create_s3_malware_protection_role ? try(aws_iam_role.s3_malware_protection[0].name, null) : try(data.aws_iam_role.s3_malware_protection[0].name, null)
+  snapshot_preservation           = var.enable_snapshot_retention ? "'RETENTION_WITH_FINDING'" : "'NO_RETENTION'"
   tags = {
     Repository = "https://github.com/aws-ia/terraform-aws-guardduty"
   }
@@ -11,6 +14,8 @@ locals {
 resource "aws_guardduty_detector" "primary" {
   #checkov:skip=CKV_AWS_238:Conditional argument for member accounts.
   #checkov:skip=CKV2_AWS_3:Org/Region will be defined by the Admin account.
+  count = var.create_detector ? 1 : 0
+
   enable = var.enable_guardduty
 
   finding_publishing_frequency = var.finding_publishing_frequency
@@ -25,13 +30,17 @@ resource "aws_guardduty_detector" "primary" {
   }
 }
 
+data "aws_guardduty_detector" "existing" {
+  count = var.create_detector ? 0 : 1
+}
+
 ##################################################
 # Amazon S3 Protection
 ##################################################
 resource "aws_guardduty_detector_feature" "s3_protection" {
   count = var.enable_guardduty && var.enable_s3_protection ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "S3_DATA_EVENTS"
   status      = "ENABLED"
 }
@@ -42,7 +51,7 @@ resource "aws_guardduty_detector_feature" "s3_protection" {
 resource "aws_guardduty_detector_feature" "rds_protection" {
   count = var.enable_guardduty && var.enable_rds_protection ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "RDS_LOGIN_EVENTS"
   status      = "ENABLED"
 }
@@ -53,7 +62,7 @@ resource "aws_guardduty_detector_feature" "rds_protection" {
 resource "aws_guardduty_detector_feature" "lambda_protection" {
   count = var.enable_guardduty && var.enable_lambda_protection ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "LAMBDA_NETWORK_LOGS"
   status      = "ENABLED"
 }
@@ -64,7 +73,7 @@ resource "aws_guardduty_detector_feature" "lambda_protection" {
 resource "aws_guardduty_detector_feature" "kubernetes_protection" {
   count = var.enable_guardduty && var.enable_kubernetes_protection ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "EKS_AUDIT_LOGS"
   status      = "ENABLED"
 }
@@ -72,7 +81,7 @@ resource "aws_guardduty_detector_feature" "kubernetes_protection" {
 resource "aws_guardduty_detector_feature" "eks_runtime_monitoring" {
   count = var.enable_guardduty && var.enable_eks_runtime_monitoring ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "RUNTIME_MONITORING"
   status      = "ENABLED"
 
@@ -89,7 +98,7 @@ resource "aws_guardduty_detector_feature" "eks_runtime_monitoring" {
 resource "aws_guardduty_detector_feature" "ecs_runtime_monitoring" {
   count = var.enable_guardduty && var.enable_ecs_runtime_monitoring ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "RUNTIME_MONITORING"
   status      = "ENABLED"
 
@@ -106,7 +115,7 @@ resource "aws_guardduty_detector_feature" "ecs_runtime_monitoring" {
 resource "aws_guardduty_detector_feature" "ec2_runtime_monitoring" {
   count = var.enable_guardduty && var.enable_ec2_runtime_monitoring ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "RUNTIME_MONITORING"
   status      = "ENABLED"
 
@@ -122,7 +131,7 @@ resource "aws_guardduty_detector_feature" "ec2_runtime_monitoring" {
 resource "aws_guardduty_detector_feature" "ebs_protection" {
   count = var.enable_guardduty && var.enable_ebs_malware_protection ? 1 : 0
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
   name        = "EBS_MALWARE_PROTECTION"
   status      = "ENABLED"
 }
@@ -132,7 +141,7 @@ resource "aws_guardduty_detector_feature" "ebs_protection" {
 ##################################################
 resource "aws_guardduty_malware_protection_plan" "this" {
   for_each = var.enable_guardduty && var.enable_malware_protection ? toset(var.malware_resource_protection) : []
-  role     = aws_iam_role.s3_malware_protection[0].arn
+  role     = local.s3_malware_protection_role_arn
 
   protected_resource {
     s3_bucket {
@@ -152,7 +161,8 @@ resource "aws_guardduty_malware_protection_plan" "this" {
   )
 
   depends_on = [
-    aws_iam_role_policy.s3_malware_protection
+    aws_iam_role.s3_malware_protection,
+    aws_iam_role_policy.s3_malware_protection,
   ]
 }
 
@@ -165,7 +175,7 @@ resource "aws_iam_service_linked_role" "malware_protection" {
 # IAM Role for S3 Malware Protection
 ##################################################
 resource "aws_iam_role" "s3_malware_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 && var.create_s3_malware_protection_role ? 1 : 0
 
   name = "GuardDutyS3MalwareProtection-${data.aws_region.current.name}"
 
@@ -186,11 +196,16 @@ resource "aws_iam_role" "s3_malware_protection" {
   )
 }
 
+data "aws_iam_role" "s3_malware_protection" {
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 && !var.create_s3_malware_protection_role ? 1 : 0
+  name  = "GuardDutyS3MalwareProtection-${data.aws_region.current.name}"
+}
+
 resource "aws_iam_role_policy" "s3_malware_protection" {
   count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
 
   name = "GuardDutyS3MalwareProtectionPolicy"
-  role = aws_iam_role.s3_malware_protection[0].id
+  role = local.s3_malware_protection_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -241,15 +256,15 @@ resource "aws_iam_role_policy" "s3_malware_protection" {
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
       },
       {
-        Sid    = "AllowPutValidationObject"
-        Effect = "Allow"
-        Action = ["s3:PutObject"]
+        Sid      = "AllowPutValidationObject"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/malware-protection-resource-validation-object"]
       },
       {
-        Sid    = "AllowCheckBucketOwnership"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "AllowCheckBucketOwnership"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
       },
       {
@@ -285,7 +300,7 @@ resource "aws_iam_role_policy" "s3_malware_protection" {
 resource "aws_guardduty_filter" "this" {
   for_each = var.enable_guardduty && var.filter_config != null ? { for filter in var.filter_config : filter.name => filter } : {}
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
 
   name        = each.value.name
   action      = each.value.action
@@ -319,7 +334,7 @@ resource "aws_guardduty_filter" "this" {
 resource "aws_guardduty_ipset" "this" {
   for_each = var.enable_guardduty && var.ipset_config != null ? { for ipset in var.ipset_config : ipset.name => ipset } : {}
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
 
   activate = each.value.activate
   name     = each.value.name
@@ -352,7 +367,7 @@ resource "aws_s3_object" "ipset_object" {
 resource "aws_guardduty_threatintelset" "this" {
   for_each = var.enable_guardduty && var.threatintelset_config != null ? { for threatintelset in var.threatintelset_config : threatintelset.name => threatintelset } : {}
 
-  detector_id = aws_guardduty_detector.primary.id
+  detector_id = local.detector_id
 
   activate = each.value.activate
   name     = each.value.name
@@ -385,7 +400,7 @@ resource "aws_s3_object" "threatintelset_object" {
 resource "aws_guardduty_publishing_destination" "this" {
   for_each = var.enable_guardduty && var.publish_to_s3 ? { for destination in var.publishing_config : destination.destination_type => destination } : {}
 
-  detector_id      = aws_guardduty_detector.primary.id
+  detector_id      = local.detector_id
   destination_arn  = each.value.destination_arn == null ? module.s3_bucket[0].s3_bucket_arn : each.value.destination_arn
   kms_key_arn      = each.value.kms_key_arn == null ? aws_kms_key.guardduty_key[0].arn : each.value.kms_key_arn
   destination_type = each.value.destination_type
