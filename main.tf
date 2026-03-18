@@ -1,7 +1,8 @@
 locals {
-  detector_id                    = var.create_detector ? aws_guardduty_detector.primary[0].id : data.aws_guardduty_detector.existing[0].id
-  s3_malware_protection_role_arn = var.create_s3_malware_protection_role ? try(aws_iam_role.s3_malware_protection[0].arn, null) : try(data.aws_iam_role.s3_malware_protection[0].arn, null)
-  snapshot_preservation          = var.enable_snapshot_retention ? "'RETENTION_WITH_FINDING'" : "'NO_RETENTION'"
+  detector_id                     = var.create_detector ? aws_guardduty_detector.primary[0].id : data.aws_guardduty_detector.existing[0].id
+  s3_malware_protection_role_arn  = var.create_s3_malware_protection_role ? try(aws_iam_role.s3_malware_protection[0].arn, null) : try(data.aws_iam_role.s3_malware_protection[0].arn, null)
+  s3_malware_protection_role_name = var.create_s3_malware_protection_role ? try(aws_iam_role.s3_malware_protection[0].name, null) : try(data.aws_iam_role.s3_malware_protection[0].name, null)
+  snapshot_preservation           = var.enable_snapshot_retention ? "'RETENTION_WITH_FINDING'" : "'NO_RETENTION'"
   tags = {
     Repository = "https://github.com/aws-ia/terraform-aws-guardduty"
   }
@@ -201,10 +202,10 @@ data "aws_iam_role" "s3_malware_protection" {
 }
 
 resource "aws_iam_role_policy" "s3_malware_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 && var.create_s3_malware_protection_role ? 1 : 0
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
 
   name = "GuardDutyS3MalwareProtectionPolicy"
-  role = aws_iam_role.s3_malware_protection[0].id
+  role = local.s3_malware_protection_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -255,15 +256,15 @@ resource "aws_iam_role_policy" "s3_malware_protection" {
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
       },
       {
-        Sid    = "AllowPutValidationObject"
-        Effect = "Allow"
-        Action = ["s3:PutObject"]
+        Sid      = "AllowPutValidationObject"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/malware-protection-resource-validation-object"]
       },
       {
-        Sid    = "AllowCheckBucketOwnership"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "AllowCheckBucketOwnership"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}"]
       },
       {
