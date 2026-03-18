@@ -3,7 +3,7 @@
 ##################################################
 output "guardduty_detector" {
   description = "AWS GuardDuty Detector."
-  value       = aws_guardduty_detector.primary
+  value       = var.create_detector ? aws_guardduty_detector.primary[0] : null
 }
 
 ##################################################
