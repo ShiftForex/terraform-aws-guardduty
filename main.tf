@@ -175,7 +175,7 @@ resource "aws_iam_service_linked_role" "malware_protection" {
 # IAM Role for S3 Malware Protection
 ##################################################
 resource "aws_iam_role" "s3_malware_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 && var.create_s3_malware_protection_role ? 1 : 0
+  count = var.enable_guardduty && var.enable_malware_protection && var.create_s3_malware_protection_role ? 1 : 0
 
   name = "GuardDutyS3MalwareProtection-${data.aws_region.current.name}"
 
@@ -197,12 +197,15 @@ resource "aws_iam_role" "s3_malware_protection" {
 }
 
 data "aws_iam_role" "s3_malware_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 && !var.create_s3_malware_protection_role ? 1 : 0
+  count = var.enable_guardduty && var.enable_malware_protection && !var.create_s3_malware_protection_role ? 1 : 0
   name  = "GuardDutyS3MalwareProtection-${data.aws_region.current.name}"
 }
 
+# Statements that GuardDuty validates at malware protection plan delete time.
+# Kept independent of var.malware_resource_protection so the role stays usable
+# for cleaning up orphan plans even when no buckets are configured.
 resource "aws_iam_role_policy" "s3_malware_protection" {
-  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
+  count = var.enable_guardduty && var.enable_malware_protection ? 1 : 0
 
   name = "GuardDutyS3MalwareProtectionPolicy"
   role = local.s3_malware_protection_role_name
@@ -235,6 +238,35 @@ resource "aws_iam_role_policy" "s3_malware_protection" {
         ]
         Resource = ["arn:aws:events:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]
       },
+      {
+        Sid    = "AllowDecryptForMalwareScan"
+        Effect = "Allow"
+        Action = [
+          "kms:GenerateDataKey",
+          "kms:Decrypt"
+        ]
+        Resource = ["arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/*"]
+        Condition = {
+          StringLike = {
+            "kms:ViaService" = "s3.${data.aws_region.current.name}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Bucket-specific statements live in a separate policy so that adding/removing
+# buckets doesn't churn the policy GuardDuty validates at plan delete time.
+resource "aws_iam_role_policy" "s3_malware_protection_buckets" {
+  count = var.enable_guardduty && var.enable_malware_protection && length(var.malware_resource_protection) > 0 ? 1 : 0
+
+  name = "GuardDutyS3MalwareProtectionBucketPolicy"
+  role = local.s3_malware_protection_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Sid    = "AllowPostScanTag"
         Effect = "Allow"
@@ -275,20 +307,6 @@ resource "aws_iam_role_policy" "s3_malware_protection" {
           "s3:GetObjectVersion"
         ]
         Resource = [for bucket in var.malware_resource_protection : "arn:aws:s3:::${bucket}/*"]
-      },
-      {
-        Sid    = "AllowDecryptForMalwareScan"
-        Effect = "Allow"
-        Action = [
-          "kms:GenerateDataKey",
-          "kms:Decrypt"
-        ]
-        Resource = ["arn:aws:kms:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:key/*"]
-        Condition = {
-          StringLike = {
-            "kms:ViaService" = "s3.${data.aws_region.current.name}.amazonaws.com"
-          }
-        }
       }
     ]
   })
